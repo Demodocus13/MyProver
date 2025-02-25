@@ -27,15 +27,13 @@ tokenize (c:cs)
     | c `elem` "→∧∨¬()" = [c] : tokenize cs  
     | isSpace c = tokenize cs                
     | otherwise = let (var, rest) = span (\x -> not (isSpace x) && not (x `elem` "→∧∨¬()")) (c:cs)
-                 in var : tokenize rest      
-
+                 in var : tokenize rest
 
 -- 解析命题
 parse :: String -> Maybe Prop
 parse input = case parseImplies (tokenize input) of
     Just (prop, []) -> Just (convert prop)  -- 转换后返回结果
     _ -> Nothing
-
 
 -- 解析to的部分
 parseImplies :: [String] -> Maybe (Prop, [String])
@@ -91,55 +89,34 @@ parseAtom _ = Nothing
 
 -- 转换\to,\bottom范式
 convert :: Prop -> Prop
-convert (And p q)         = Implies (convert (Not p)) (convert (Not q))  
-convert (Or p q)          = Implies (convert (Not p)) (convert q)        
-convert (Not (Not p))     = convert p                                   
-convert (Not p)           = Implies (convert p) Bottom                 
+convert (Not (Not p))     = convert p   
+convert (Not p)           = Implies (convert p) Bottom   
+convert (And p q)         = Implies ((Implies (convert (Not p)) (convert (Not q)))) Bottom
+convert (Or p q)          = Implies (convert (Not p)) (convert q)                                                          
 convert (Implies p q)     = Implies (convert p) (convert q)        
 convert p                 = p      
-
--- -- 转换为析取范式（DNF）
--- convertDNF :: Prop -> Prop
--- convertDNF (And p q)         = And (convertDNF p) (convertDNF q)  
--- convertDNF (Or p q)          = Or (convertDNF p) (convertDNF q)   
--- convertDNF (Not (Not p))     = convertDNF p   
--- convertDNF (Not p)           = Not (convertDNF p)               
--- convertDNF (Implies p q)     = Or (convertDNF (Not p)) (convertDNF q)
--- convertDNF (Iff p q)         = Or (And (convertDNF p) (convertDNF q)) (And (convertDNF (Not p)) (convertDNF (Not q)))
--- convertDNF p                 = p
-
--- -- 转换为合取范式（CNF）
--- convertCNF :: Prop -> Prop
--- convertCNF (And p q)         = And (convertCNF p) (convertCNF q)  
--- convertCNF (Or p q)          = Or (convertCNF p) (convertCNF q)   
--- convertCNF (Not (Not p))     = convertCNF p   
--- convertCNF (Not p)           = Not (convertCNF p)               
--- convertCNF (Implies p q)     = Or (convertCNF (Not p)) (convertCNF q)
--- convertCNF (Iff p q)         = And (Or (convertCNF p) (convertCNF q)) (Or (convertCNF (Not p)) (convertCNF (Not q)))
--- convertCNF p                 = p
-
 
 data ProofState = ProofState { context :: [(String, Prop)], goal :: Prop }
 
 --证明命题
-prove :: ProofState -> (Either Proof String, [String])  
+prove :: ProofState -> (Either Proof String, [String])
 prove state = case goal state of
-    Implies p q -> let (success1, steps1) = prove (state { goal = p })
-                       (success2, steps2) = prove (state { goal = q })
-                   in (combineProof success1 success2 ImpliesElim, steps1 ++ steps2)
-    Bottom -> (Left (FalsumIntro (Assumption Bottom)), ["矛盾命题无法推导"])
+    Bottom -> (Left (FalsumIntro (Assumption Bottom)), ["矛盾命题无法推导"])  -- 如果是矛盾命题，直接返回
+    Implies p q -> 
+        let (success1, steps1) = prove (state { goal = p })
+            (success2, steps2) = prove (state { goal = q })
+        in case success1 of
+            Left (FalsumIntro _) -> (Left (FalsumIntro (Assumption Bottom)), steps1 ++ steps2)  -- 如果推导过程中遇到矛盾，立即返回
+            _ -> (combineProof success1 success2 ImpliesElim, steps1 ++ steps2)
+    
     Var var -> (Left (Assumption (Var var)), [var ++ " 已知命题，可以推导"])
+
     _ -> (Right "无法证明该命题", ["无法证明该命题"])
 
 combineProof :: Either Proof String -> Either Proof String -> (Proof -> Proof -> Proof) -> Either Proof String
 combineProof (Left p1) (Left p2) rule = Left (rule p1 p2)
 combineProof (Right err) _ _ = Right err
 combineProof _ (Right err) _ = Right err
-
-proveImpliesElim :: Proof -> Proof -> Either Proof String
-proveImpliesElim (ImpliesIntro p proof) (Assumption p1) = 
-    combineProof (Left proof) (Left (Assumption p1)) ImpliesElim
-proveImpliesElim _ _ = Right "推理错误"
 
 main :: IO ()
 main = do
@@ -162,6 +139,6 @@ proofLoop = do
                         putStrLn "命题可证明。"
                         putStrLn "证明过程："
                         print proof
-                    Right err -> putStrLn err
+                    Right err -> putStrLn err  
             Nothing -> putStrLn "解析失败，格式错误。"
-        proofLoop  
+        proofLoop
